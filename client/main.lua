@@ -1,9 +1,9 @@
 local duiCache = {}
 local creatingDui = {}
 local applied = {}
-local remoteSkins = {}
 local localSkin
 local localWeaponName
+local nearbyConflict = false
 
 local function notify(description, nType)
     lib.notify({
@@ -59,11 +59,34 @@ local function restoreSkin(weaponName)
     applied[weaponName] = nil
 end
 
+-- DUI replace is global per texture. If another copy of this weapon is
+-- streamed, hide the skin so their gun does not pick up your image.
+---@param weaponName string
+---@return boolean
+local function hasNearbySameWeapon(weaponName)
+    local hash = joaat(weaponName)
+    local myPed = cache.ped
+    local peds = GetGamePool('CPed')
+
+    for i = 1, #peds do
+        local ped = peds[i]
+        if ped ~= myPed and GetSelectedPedWeapon(ped) == hash then
+            return true
+        end
+    end
+
+    return false
+end
+
 ---@param weaponName string
 ---@param url string
 local function applySkin(weaponName, url)
     local weapon = Config.Weapons[weaponName]
     if not weapon or not url then return end
+
+    if localWeaponName ~= weaponName then return end
+    if not (localSkin and localSkin.name == weaponName and localSkin.url == url) then return end
+    if nearbyConflict then return end
 
     local current = applied[weaponName]
     if current and current.url == url then return end
@@ -76,18 +99,9 @@ local function applySkin(weaponName, url)
     local dui = getDui(url)
     if not dui then return end
 
-    if localWeaponName == weaponName then
-        if not (localSkin and localSkin.url == url) then return end
-    else
-        local remoteWantsUrl = false
-        for _, skin in pairs(remoteSkins) do
-            if skin.name == weaponName and skin.url == url then
-                remoteWantsUrl = true
-                break
-            end
-        end
-        if not remoteWantsUrl then return end
-    end
+    if localWeaponName ~= weaponName then return end
+    if not (localSkin and localSkin.name == weaponName and localSkin.url == url) then return end
+    if nearbyConflict or hasNearbySameWeapon(weaponName) then return end
 
     AddReplaceTexture(weapon.ytd, weapon.texture, dui.dictName, dui.txtName)
     applied[weaponName] = {
@@ -101,22 +115,9 @@ end
 local function refreshWeaponModel(weaponName)
     if not weaponName or not Config.Weapons[weaponName] then return end
 
-    if localSkin and localSkin.name == weaponName and localSkin.url then
+    if localSkin and localSkin.name == weaponName and localSkin.url and not nearbyConflict then
         applySkin(weaponName, localSkin.url)
         return
-    end
-
-    -- Keep the vanilla texture while this client is holding that model
-    if localWeaponName == weaponName then
-        restoreSkin(weaponName)
-        return
-    end
-
-    for _, skin in pairs(remoteSkins) do
-        if skin.name == weaponName and skin.url then
-            applySkin(weaponName, skin.url)
-            return
-        end
     end
 
     restoreSkin(weaponName)
@@ -126,10 +127,10 @@ local function setLocalSkin(weaponName, url)
     local previous = localSkin
     if url and weaponName then
         localSkin = { name = weaponName, url = url }
-        LocalPlayer.state:set('weaponSkin', localSkin, true)
+        nearbyConflict = hasNearbySameWeapon(weaponName)
     else
         localSkin = nil
-        LocalPlayer.state:set('weaponSkin', nil, true)
+        nearbyConflict = false
     end
 
     if previous and previous.name then
@@ -270,28 +271,6 @@ AddEventHandler('ox_inventory:currentWeapon', function(weapon)
     setLocalSkin(nil)
 end)
 
-AddStateBagChangeHandler('weaponSkin', '', function(bagName, _, value)
-    local playerId = GetPlayerFromStateBagName(bagName)
-    if not playerId or playerId == 0 or playerId == cache.playerId then return end
-
-    local serverId = GetPlayerServerId(playerId)
-    local previous = remoteSkins[serverId]
-    local nextSkin = (type(value) == 'table' and value.name and value.url) and {
-        name = value.name,
-        url = value.url,
-    } or nil
-
-    remoteSkins[serverId] = nextSkin
-
-    if previous and previous.name then
-        refreshWeaponModel(previous.name)
-    end
-
-    if nextSkin and (not previous or previous.name ~= nextSkin.name) then
-        refreshWeaponModel(nextSkin.name)
-    end
-end)
-
 CreateThread(function()
     while GetResourceState('ox_inventory') ~= 'started' do
         Wait(100)
@@ -310,18 +289,19 @@ CreateThread(function()
     if weapon and weapon.name and weapon.metadata and weapon.metadata.skinUrl then
         setLocalSkin(weapon.name, weapon.metadata.skinUrl)
     end
+end)
 
-    for _, playerId in ipairs(GetActivePlayers()) do
-        if playerId ~= cache.playerId then
-            local serverId = GetPlayerServerId(playerId)
-            local state = Player(serverId).state.weaponSkin
-            if type(state) == 'table' and state.name and state.url then
-                remoteSkins[serverId] = {
-                    name = state.name,
-                    url = state.url,
-                }
-                refreshWeaponModel(state.name)
+CreateThread(function()
+    while true do
+        if localSkin and localSkin.name then
+            local conflict = hasNearbySameWeapon(localSkin.name)
+            if conflict ~= nearbyConflict then
+                nearbyConflict = conflict
+                refreshWeaponModel(localSkin.name)
             end
+            Wait(250)
+        else
+            Wait(500)
         end
     end
 end)
@@ -372,6 +352,4 @@ AddEventHandler('onResourceStop', function(resourceName)
     for i = 1, #names do
         restoreSkin(names[i])
     end
-
-    LocalPlayer.state:set('weaponSkin', nil, true)
 end)

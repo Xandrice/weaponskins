@@ -2,6 +2,6 @@ Applies a custom image to a weapon and stores it on the item in ox_inventory. Th
 
 Players use ox_target at a set location (or change it to an item / command). They need to be on duty as the configured job, hold a supported weapon, and paste an image link. There is also a debug command that skips the job check so you can test without setting up the job first.
 
-The image is drawn onto the weapon with a DUI texture replace, so other players nearby can see it. Hosts are allowlisted in the config. Imgur and Discord links are blocked even if you add them. png, jpg, jpeg, webp, and apng are accepted.
+The image is drawn onto your weapon with a DUI texture replace. Only you see it; everyone else sees the vanilla gun. If another player nearby is holding the same weapon type, the skin hides so their gun does not pick up your texture. Hosts are allowlisted in the config. Imgur and Discord links are blocked even if you add them. png, jpg, jpeg, webp, and apng are accepted.
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5346bdd4-619f-4707-9a35-19908db86516" />
